@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useRef, useState, useMemo, useLayoutEffect } from 'react';
+import { useEffect, useRef, useState, useMemo, useLayoutEffect, useCallback } from 'react';
 import { motion, AnimatePresence, Reorder } from 'framer-motion';
 import Announcement from "./components/Announcement";
 import zhifubaoImg from "./assets/zhifubao.png";
 import weixinImg from "./assets/weixin.png";
+import { fundService, groupService, settingsService, realtimeService, migrationService } from '../lib/supabase';
 
 function PlusIcon(props) {
   return (
@@ -1727,8 +1728,13 @@ export default function HomePage() {
       const next = { ...prev };
       if (data.share === null && data.cost === null) {
         delete next[code];
+        // 同步到 Supabase（清空持仓）
+        fundService.updateFund(code, { holdingAmount: 0 }).catch(err => console.error('同步持仓到云端失败:', err));
       } else {
         next[code] = data;
+        // 同步到 Supabase（计算持仓金额 = 份额 * 成本）
+        const holdingAmount = (data.share || 0) * (data.cost || 0);
+        fundService.updateFund(code, { holdingAmount }).catch(err => console.error('同步持仓到云端失败:', err));
       }
       localStorage.setItem('holdings', JSON.stringify(next));
       return next;
@@ -1833,12 +1839,15 @@ export default function HomePage() {
   const toggleFavorite = (code) => {
     setFavorites(prev => {
       const next = new Set(prev);
+      const isFavorite = !next.has(code);
       if (next.has(code)) {
         next.delete(code);
       } else {
         next.add(code);
       }
       localStorage.setItem('favorites', JSON.stringify(Array.from(next)));
+      // 同步到 Supabase
+      fundService.updateFund(code, { isFavorite }).catch(err => console.error('同步自选状态到云端失败:', err));
       if (next.size === 0) setCurrentTab('all');
       return next;
     });
@@ -1847,6 +1856,7 @@ export default function HomePage() {
   const toggleCollapse = (code) => {
     setCollapsedCodes(prev => {
       const next = new Set(prev);
+      const isCollapsed = !next.has(code);
       if (next.has(code)) {
         next.delete(code);
       } else {
@@ -1854,6 +1864,8 @@ export default function HomePage() {
       }
       // 同步到本地存储
       localStorage.setItem('collapsedCodes', JSON.stringify(Array.from(next)));
+      // 同步到 Supabase
+      fundService.updateFund(code, { isCollapsed }).catch(err => console.error('同步折叠状态到云端失败:', err));
       return next;
     });
   };
@@ -1867,6 +1879,8 @@ export default function HomePage() {
     const next = [...groups, newGroup];
     setGroups(next);
     localStorage.setItem('groups', JSON.stringify(next));
+    // 同步到 Supabase
+    groupService.saveGroups(next).catch(err => console.error('同步分组到云端失败:', err));
     setCurrentTab(newGroup.id);
     setGroupModalOpen(false);
   };
@@ -1875,13 +1889,17 @@ export default function HomePage() {
     const next = groups.filter(g => g.id !== id);
     setGroups(next);
     localStorage.setItem('groups', JSON.stringify(next));
+    // 同步到 Supabase
+    groupService.saveGroups(next).catch(err => console.error('同步分组到云端失败:', err));
     if (currentTab === id) setCurrentTab('all');
   };
 
   const handleUpdateGroups = (newGroups) => {
     setGroups(newGroups);
     localStorage.setItem('groups', JSON.stringify(newGroups));
-    // 如果当前选中的分组被删除了，切换回“全部”
+    // 同步到 Supabase
+    groupService.saveGroups(newGroups).catch(err => console.error('同步分组到云端失败:', err));
+    // 如果当前选中的分组被删除了，切换回"全部"
     if (currentTab !== 'all' && currentTab !== 'fav' && !newGroups.find(g => g.id === currentTab)) {
       setCurrentTab('all');
     }
@@ -1900,6 +1918,8 @@ export default function HomePage() {
     });
     setGroups(next);
     localStorage.setItem('groups', JSON.stringify(next));
+    // 同步到 Supabase
+    groupService.saveGroups(next).catch(err => console.error('同步分组到云端失败:', err));
     setAddFundToGroupOpen(false);
     setSuccessModal({ open: true, message: `成功添加 ${codes.length} 支基金` });
   };
@@ -1944,47 +1964,151 @@ export default function HomePage() {
     });
   };
 
+  // Supabase 数据加载和迁移
   useEffect(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem('funds') || '[]');
-      if (Array.isArray(saved) && saved.length) {
-        const deduped = dedupeByCode(saved);
-        setFunds(deduped);
-        localStorage.setItem('funds', JSON.stringify(deduped));
-        const codes = Array.from(new Set(deduped.map((f) => f.code)));
-        if (codes.length) refreshAll(codes);
+    const loadData = async () => {
+      try {
+        // 1. 检查是否需要从 localStorage 迁移到 Supabase
+        const needMigration = await migrationService.checkMigrationNeeded();
+        if (needMigration) {
+          console.log('检测到本地数据，开始迁移到云端...');
+          await migrationService.migrate();
+        }
+
+        // 2. 从 Supabase 加载数据
+        const [fundsData, groupsData, settingsData] = await Promise.all([
+          fundService.getFullFundsData(),
+          groupService.getGroups(),
+          settingsService.getSettings(),
+        ]);
+
+        // 3. 设置状态
+        if (fundsData.funds.length > 0) {
+          const deduped = dedupeByCode(fundsData.funds);
+          setFunds(deduped);
+          setFavorites(fundsData.favorites);
+          setCollapsedCodes(fundsData.collapsedCodes);
+          setHoldings(fundsData.holdings);
+
+          // 同步到 localStorage（作为缓存）
+          localStorage.setItem('funds', JSON.stringify(deduped));
+          localStorage.setItem('favorites', JSON.stringify(Array.from(fundsData.favorites)));
+          localStorage.setItem('collapsedCodes', JSON.stringify(Array.from(fundsData.collapsedCodes)));
+          localStorage.setItem('holdings', JSON.stringify(fundsData.holdings));
+
+          const codes = Array.from(new Set(deduped.map((f) => f.code)));
+          if (codes.length) refreshAll(codes);
+        } else {
+          // Supabase 为空，尝试从 localStorage 加载
+          const saved = JSON.parse(localStorage.getItem('funds') || '[]');
+          if (Array.isArray(saved) && saved.length) {
+            const deduped = dedupeByCode(saved);
+            setFunds(deduped);
+            const codes = Array.from(new Set(deduped.map((f) => f.code)));
+            if (codes.length) refreshAll(codes);
+          }
+        }
+
+        if (groupsData.length > 0) {
+          setGroups(groupsData);
+          localStorage.setItem('groups', JSON.stringify(groupsData));
+        } else {
+          const savedGroups = JSON.parse(localStorage.getItem('groups') || '[]');
+          if (Array.isArray(savedGroups)) setGroups(savedGroups);
+        }
+
+        // 设置用户偏好
+        if (settingsData.refreshMs && Number.isFinite(settingsData.refreshMs) && settingsData.refreshMs >= 5000) {
+          setRefreshMs(settingsData.refreshMs);
+          setTempSeconds(Math.round(settingsData.refreshMs / 1000));
+          localStorage.setItem('refreshMs', String(settingsData.refreshMs));
+        } else {
+          const savedMs = parseInt(localStorage.getItem('refreshMs') || '30000', 10);
+          if (Number.isFinite(savedMs) && savedMs >= 5000) {
+            setRefreshMs(savedMs);
+            setTempSeconds(Math.round(savedMs / 1000));
+          }
+        }
+
+        if (settingsData.viewMode === 'card' || settingsData.viewMode === 'list') {
+          setViewMode(settingsData.viewMode);
+          localStorage.setItem('viewMode', settingsData.viewMode);
+        } else {
+          const savedViewMode = localStorage.getItem('viewMode');
+          if (savedViewMode === 'card' || savedViewMode === 'list') setViewMode(savedViewMode);
+        }
+
+        console.log('数据加载完成');
+      } catch (error) {
+        console.error('从 Supabase 加载数据失败，使用本地数据:', error);
+        // 降级到 localStorage
+        try {
+          const saved = JSON.parse(localStorage.getItem('funds') || '[]');
+          if (Array.isArray(saved) && saved.length) {
+            const deduped = dedupeByCode(saved);
+            setFunds(deduped);
+            const codes = Array.from(new Set(deduped.map((f) => f.code)));
+            if (codes.length) refreshAll(codes);
+          }
+          const savedMs = parseInt(localStorage.getItem('refreshMs') || '30000', 10);
+          if (Number.isFinite(savedMs) && savedMs >= 5000) {
+            setRefreshMs(savedMs);
+            setTempSeconds(Math.round(savedMs / 1000));
+          }
+          const savedCollapsed = JSON.parse(localStorage.getItem('collapsedCodes') || '[]');
+          if (Array.isArray(savedCollapsed)) setCollapsedCodes(new Set(savedCollapsed));
+          const savedFavorites = JSON.parse(localStorage.getItem('favorites') || '[]');
+          if (Array.isArray(savedFavorites)) setFavorites(new Set(savedFavorites));
+          const savedGroups = JSON.parse(localStorage.getItem('groups') || '[]');
+          if (Array.isArray(savedGroups)) setGroups(savedGroups);
+          const savedViewMode = localStorage.getItem('viewMode');
+          if (savedViewMode === 'card' || savedViewMode === 'list') setViewMode(savedViewMode);
+          const savedHoldings = JSON.parse(localStorage.getItem('holdings') || '{}');
+          if (savedHoldings && typeof savedHoldings === 'object') setHoldings(savedHoldings);
+        } catch {}
       }
-      const savedMs = parseInt(localStorage.getItem('refreshMs') || '30000', 10);
-      if (Number.isFinite(savedMs) && savedMs >= 5000) {
-        setRefreshMs(savedMs);
-        setTempSeconds(Math.round(savedMs / 1000));
+    };
+
+    loadData();
+  }, []);
+
+  // Supabase 实时订阅 - 监听其他设备的修改
+  useEffect(() => {
+    const unsubscribeFunds = realtimeService.subscribeFunds(async (payload) => {
+      console.log('收到基金数据更新:', payload);
+      // 重新加载所有基金数据
+      const fundsData = await fundService.getFullFundsData();
+      if (fundsData.funds.length > 0) {
+        setFunds(dedupeByCode(fundsData.funds));
+        setFavorites(fundsData.favorites);
+        setCollapsedCodes(fundsData.collapsedCodes);
+        setHoldings(fundsData.holdings);
       }
-      // 加载收起状态
-      const savedCollapsed = JSON.parse(localStorage.getItem('collapsedCodes') || '[]');
-      if (Array.isArray(savedCollapsed)) {
-        setCollapsedCodes(new Set(savedCollapsed));
+    });
+
+    const unsubscribeGroups = realtimeService.subscribeGroups(async (payload) => {
+      console.log('收到分组数据更新:', payload);
+      const groupsData = await groupService.getGroups();
+      setGroups(groupsData);
+    });
+
+    const unsubscribeSettings = realtimeService.subscribeSettings(async (payload) => {
+      console.log('收到设置更新:', payload);
+      const settingsData = await settingsService.getSettings();
+      if (settingsData.refreshMs) {
+        setRefreshMs(settingsData.refreshMs);
+        setTempSeconds(Math.round(settingsData.refreshMs / 1000));
       }
-      // 加载自选状态
-      const savedFavorites = JSON.parse(localStorage.getItem('favorites') || '[]');
-      if (Array.isArray(savedFavorites)) {
-        setFavorites(new Set(savedFavorites));
+      if (settingsData.viewMode) {
+        setViewMode(settingsData.viewMode);
       }
-      // 加载分组状态
-      const savedGroups = JSON.parse(localStorage.getItem('groups') || '[]');
-      if (Array.isArray(savedGroups)) {
-        setGroups(savedGroups);
-      }
-      // 加载视图模式
-      const savedViewMode = localStorage.getItem('viewMode');
-      if (savedViewMode === 'card' || savedViewMode === 'list') {
-        setViewMode(savedViewMode);
-      }
-      // 加载持仓数据
-      const savedHoldings = JSON.parse(localStorage.getItem('holdings') || '{}');
-      if (savedHoldings && typeof savedHoldings === 'object') {
-        setHoldings(savedHoldings);
-      }
-    } catch {}
+    });
+
+    return () => {
+      unsubscribeFunds();
+      unsubscribeGroups();
+      unsubscribeSettings();
+    };
   }, []);
 
   useEffect(() => {
@@ -2313,6 +2437,8 @@ export default function HomePage() {
     const nextMode = viewMode === 'card' ? 'list' : 'card';
     setViewMode(nextMode);
     localStorage.setItem('viewMode', nextMode);
+    // 同步到 Supabase
+    settingsService.updateSettings({ viewMode: nextMode }).catch(err => console.error('同步视图模式到云端失败:', err));
   };
 
   const addFund = async (e) => {
@@ -2351,6 +2477,10 @@ export default function HomePage() {
         const next = dedupeByCode([...newFunds, ...funds]);
         setFunds(next);
         localStorage.setItem('funds', JSON.stringify(next));
+        // 同步到 Supabase
+        for (const fund of newFunds) {
+          fundService.addFund(fund.code, fund.name).catch(err => console.error('同步基金到云端失败:', err));
+        }
       }
       setSearchTerm('');
       setSelectedFunds([]);
@@ -2371,6 +2501,9 @@ export default function HomePage() {
     setFunds(next);
     localStorage.setItem('funds', JSON.stringify(next));
 
+    // 同步到 Supabase
+    fundService.deleteFund(removeCode).catch(err => console.error('从云端删除基金失败:', err));
+
     // 同步删除分组中的失效代码
     const nextGroups = groups.map(g => ({
       ...g,
@@ -2378,6 +2511,8 @@ export default function HomePage() {
     }));
     setGroups(nextGroups);
     localStorage.setItem('groups', JSON.stringify(nextGroups));
+    // 同步分组到云端
+    groupService.saveGroups(nextGroups).catch(err => console.error('同步分组到云端失败:', err));
 
     // 同步删除展开收起状态
     setCollapsedCodes(prev => {
@@ -2420,6 +2555,8 @@ export default function HomePage() {
     const ms = Math.max(5, Number(tempSeconds)) * 1000;
     setRefreshMs(ms);
     localStorage.setItem('refreshMs', String(ms));
+    // 同步到 Supabase
+    settingsService.updateSettings({ refreshMs: ms }).catch(err => console.error('同步设置到云端失败:', err));
     setSettingsOpen(false);
   };
 
