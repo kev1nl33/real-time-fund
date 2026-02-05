@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { fundService } from '../lib/supabase';
 
 export default function TestPage() {
   const [funds, setFunds] = useState([]);
@@ -15,6 +14,9 @@ export default function TestPage() {
   async function loadFunds() {
     try {
       setLoading(true);
+      
+      // 动态导入，避免构建时执行
+      const { fundService } = await import('../../lib/supabase');
       const { data, error } = await fundService.getFunds();
       
       if (error) {
