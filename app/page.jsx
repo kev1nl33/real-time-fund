@@ -1729,12 +1729,12 @@ export default function HomePage() {
       if (data.share === null && data.cost === null) {
         delete next[code];
         // 同步到 Supabase（清空持仓）
-        fundService.updateFund(code, { holdingAmount: 0 }).catch(err => console.error('同步持仓到云端失败:', err));
+        fundService.updateFund(code, { holdingAmount: 0, holdingShares: 0, holdingCost: 0 }).catch(err => console.error('同步持仓到云端失败:', err));
       } else {
         next[code] = data;
-        // 同步到 Supabase（计算持仓金额 = 份额 * 成本）
+        // 同步到 Supabase（保存份额、成本价和持仓金额）
         const holdingAmount = (data.share || 0) * (data.cost || 0);
-        fundService.updateFund(code, { holdingAmount }).catch(err => console.error('同步持仓到云端失败:', err));
+        fundService.updateFund(code, { holdingAmount, holdingShares: data.share || 0, holdingCost: data.cost || 0 }).catch(err => console.error('同步持仓到云端失败:', err));
       }
       localStorage.setItem('holdings', JSON.stringify(next));
       return next;

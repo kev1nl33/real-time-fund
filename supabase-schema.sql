@@ -12,6 +12,8 @@ CREATE TABLE funds (
   fund_code TEXT NOT NULL,
   fund_name TEXT DEFAULT '',
   holding_amount DECIMAL(20, 2) DEFAULT 0,  -- 持有金额
+  holding_shares DECIMAL(20, 4) DEFAULT 0,  -- 持仓份额
+  holding_cost DECIMAL(20, 4) DEFAULT 0,    -- 持仓成本价
   is_favorite BOOLEAN DEFAULT false,         -- 是否自选
   is_collapsed BOOLEAN DEFAULT false,        -- 是否折叠重仓股
   group_id TEXT DEFAULT NULL,                -- 所属分组 ID
