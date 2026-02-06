@@ -2076,10 +2076,20 @@ export default function HomePage() {
   useEffect(() => {
     const unsubscribeFunds = realtimeService.subscribeFunds(async (payload) => {
       console.log('收到基金数据更新:', payload);
-      // 重新加载所有基金数据
+      // 重新加载数据库中的元数据（自选、持仓、分组等）
       const fundsData = await fundService.getFullFundsData();
       if (fundsData.funds.length > 0) {
-        setFunds(dedupeByCode(fundsData.funds));
+        // 将数据库元数据合并到现有 funds 上，保留已加载的行情数据（gsz, dwjz, estGsz 等）
+        setFunds(prev => {
+          const prevMap = new Map(prev.map(f => [f.code, f]));
+          const merged = fundsData.funds.map(dbFund => ({
+            ...dbFund,
+            ...(prevMap.get(dbFund.code) || {}),
+            // 确保数据库元数据优先
+            groupId: dbFund.groupId,
+          }));
+          return dedupeByCode(merged);
+        });
         setFavorites(fundsData.favorites);
         setCollapsedCodes(fundsData.collapsedCodes);
         setHoldings(fundsData.holdings);
