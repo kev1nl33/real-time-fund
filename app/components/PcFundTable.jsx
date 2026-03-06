@@ -363,13 +363,13 @@ export default function PcFundTable({
     const rowContext = useContext(SortableRowContext);
 
     return (
-      <div className="name-cell-content" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div className="name-cell-content" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', gap: 8 }}>
         {sortBy === 'default' && (
           <button
             className="icon-button drag-handle"
             ref={rowContext?.setActivatorNodeRef}
             {...rowContext?.listeners}
-            style={{ cursor: 'grab', padding: 2, margin: '-2px -4px -2px 0', color: 'var(--muted)', background: 'transparent', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            style={{ cursor: 'grab', width: 20, height: 20, padding: 2, margin: '0', flexShrink: 0, color: 'var(--muted)', background: 'transparent', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             title="拖拽排序"
             onClick={(e) => e.stopPropagation?.()}
           >
