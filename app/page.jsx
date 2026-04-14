@@ -6740,6 +6740,7 @@ export default function HomePage() {
           onHeightChange={setMarketIndexAccordionHeight}
           isMobile={isMobile}
           onCustomSettingsChange={triggerCustomSettingsSync}
+          refreshing={refreshing}
         />
       )}
       <div className="grid">
