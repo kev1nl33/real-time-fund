@@ -29,11 +29,15 @@ const nowInTz = () => dayjs().tz(TZ);
 const toTz = (input) => (input ? dayjs.tz(input, TZ) : nowInTz());
 const formatDate = (input) => toTz(input).format('YYYY-MM-DD');
 
-export function DatePicker({ value, onChange, position = 'bottom' }) {
+export function DatePicker({ value, onChange, position = 'bottom', minDate }) {
   const [open, setOpen] = useState(false);
   const today = nowInTz().startOf('day');
   const selected = value ? toTz(value).toDate() : undefined;
   const weekdayLabels = ['日', '一', '二', '三', '四', '五', '六'];
+
+  const disabled = minDate
+    ? { before: toTz(minDate).startOf('day').toDate() }
+    : { after: today.toDate() };
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -66,11 +70,12 @@ export function DatePicker({ value, onChange, position = 'bottom' }) {
             today:
               "rounded-md bg-primary/15 text-primary data-[selected=true]:bg-primary data-[selected=true]:text-primary-foreground",
           }}
-          disabled={{ after: today.toDate() }}
+          disabled={disabled}
           onSelect={(d) => {
             if (!d) return;
             const next = toTz(d).startOf('day');
-            if (next.isAfter(today)) return;
+            if (minDate && next.isBefore(toTz(minDate).startOf('day'))) return;
+            if (!minDate && next.isAfter(today)) return;
             onChange(formatDate(next));
             setOpen(false);
           }}

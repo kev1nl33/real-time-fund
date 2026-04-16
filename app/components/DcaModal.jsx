@@ -81,6 +81,15 @@ const computeFirstDate = (cycle, weeklyDay, monthlyDay) => {
   return formatDate(today);
 };
 
+const resolveDailyFirstDate = (savedFirstDate) => {
+  const autoFirstDate = computeFirstDate('daily');
+  if (!savedFirstDate) return autoFirstDate;
+
+  return dayjs.tz(savedFirstDate, TZ).isAfter(dayjs.tz(autoFirstDate, TZ))
+    ? savedFirstDate
+    : autoFirstDate;
+};
+
 export default function DcaModal({ fund, plan, onClose, onConfirm }) {
   const [amount, setAmount] = useState('');
   const [feeRate, setFeeRate] = useState('0');
@@ -96,8 +105,10 @@ export default function DcaModal({ fund, plan, onClose, onConfirm }) {
   });
   const [firstDate, setFirstDate] = useState(() => computeFirstDate('monthly', null, null));
   const monthlyDayRef = useRef(null);
+  const skipNextAutoComputeRef = useRef(false);
 
   useEffect(() => {
+    skipNextAutoComputeRef.current = true;
     if (!plan) {
       // 新建定投时，以当前默认 weeklyDay/monthlyDay 计算一次首扣日期
       setFirstDate(computeFirstDate('monthly', weeklyDay, monthlyDay));
@@ -120,13 +131,22 @@ export default function DcaModal({ fund, plan, onClose, onConfirm }) {
     }
     if (plan.cycle && CYCLES.some(c => c.value === plan.cycle)) {
       setCycle(plan.cycle);
-      setFirstDate(plan.firstDate || computeFirstDate(plan.cycle, plan.weeklyDay, plan.monthlyDay));
+      setFirstDate(
+        plan.cycle === 'daily'
+          ? resolveDailyFirstDate(plan.firstDate)
+          : (plan.firstDate || computeFirstDate(plan.cycle, plan.weeklyDay, plan.monthlyDay))
+      );
     } else {
       setFirstDate(plan.firstDate || computeFirstDate('monthly', null, null));
     }
   }, [plan]);
 
   useEffect(() => {
+    if (skipNextAutoComputeRef.current) {
+      skipNextAutoComputeRef.current = false;
+      return;
+    }
+    if (cycle === 'daily') return;
     setFirstDate(computeFirstDate(cycle, weeklyDay, monthlyDay));
   }, [cycle, weeklyDay, monthlyDay]);
 
@@ -343,11 +363,17 @@ export default function DcaModal({ fund, plan, onClose, onConfirm }) {
               <label className="muted" style={{ display: 'block', marginBottom: 4, fontSize: '14px' }}>
                 首次扣款日期
               </label>
-              <div className="dca-first-date-display">
-                {firstDate}
-              </div>
+              {cycle === 'daily' ? (
+                <DatePicker value={firstDate} onChange={setFirstDate} minDate={nowInTz().format('YYYY-MM-DD')} />
+              ) : (
+                <div className="dca-first-date-display">
+                  {firstDate}
+                </div>
+              )}
               <div className="muted" style={{ marginTop: 4, fontSize: 12 }}>
-                * 基于当前日期和所选周期/扣款日自动计算：每日=当天；每周/每两周=从今天起最近的所选工作日；每月=从今天起最近的所选日期（1-28日）。
+                {cycle === 'daily'
+                  ? '* 选择首次扣款日期（不能晚于今天）'
+                  : '* 基于当前日期和所选周期/扣款日自动计算：每日=当天；每周/每两周=从今天起最近的所选工作日；每月=从今天起最近的所选日期（1-28日）。'}
               </div>
             </div>
           </form>
