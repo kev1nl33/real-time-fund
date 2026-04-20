@@ -75,6 +75,7 @@ import MarketIndexAccordion from "./components/MarketIndexAccordion";
 import SortSettingModal from "./components/SortSettingModal";
 import githubImg from "./assets/github.svg";
 import { supabase, isSupabaseConfigured } from './lib/supabase';
+import { scheduleGistSync, loadFromGist } from '@/lib/storage-adapter';
 import { recordValuation, getAllValuationSeries, clearFund } from './lib/valuationTimeseries';
 import {
   DAILY_EARNINGS_SCOPE_ALL,
@@ -691,6 +692,12 @@ export default function HomePage() {
         document.documentElement.setAttribute('data-theme', fromStorage);
       }
     } catch { }
+  }, []);
+
+  // 从 GitHub Gist 恢复云端数据
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    loadFromGist();
   }, []);
 
   useEffect(() => {
@@ -2932,6 +2939,7 @@ export default function HomePage() {
           setLastSyncTime(now);
         }
         scheduleSync();
+        scheduleGistSync();
       }
     };
     return {
