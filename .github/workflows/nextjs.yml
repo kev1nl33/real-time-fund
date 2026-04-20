@@ -81,6 +81,7 @@ jobs:
           NEXT_PUBLIC_GITHUB_LATEST_RELEASE_URL=${{ secrets.NEXT_PUBLIC_GITHUB_LATEST_RELEASE_URL }}
           NEXT_PUBLIC_IS_GITHUB_LOGIN=${{ secrets.NEXT_PUBLIC_IS_GITHUB_LOGIN }}
           NEXT_PUBLIC_GIST_TOKEN=${{ secrets.GIST_TOKEN }}
+          NEXT_PUBLIC_GIST_ID=${{ secrets.GIST_ID }}
           EOF
       - name: Install dependencies
         run: ${{ steps.detect-package-manager.outputs.manager }} ${{ steps.detect-package-manager.outputs.command }}
